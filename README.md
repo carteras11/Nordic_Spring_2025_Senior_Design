@@ -13,8 +13,12 @@
 2. Find the project, give a descroption and do "commit to main"
 3. Then, click the push button that appears at the top. 
 
+## Building
+* Make sure to add the base config file, the extra config file, and the base devicetree overlay file too when making a new build
 
 ## Other Notes
 
 * The current hello_dect is the one that has working i2c
 * The repo is automatically set to disable build files. You will have to re-build whenever you want to test. Local build files will remain
+
+
