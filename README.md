@@ -3,7 +3,7 @@
 ## Instructions (Brief)
 
 1. Dowload GitHub Desktop, log in
-2. Clone the reposity
+2. Clone the reposity **AT OR VERY NEAR YOUR C:// DRIVE IF ON WINDOWS, AS BUILD PROBLEMS WILL OCCURE IF ANY FILE PATH NAMES ARE TOO LONG**
 3. Probably is smart to make a branch before working so that we don't overwrite main. Do this in git hub desktop
 4. make any chnages, re-build, program board, etc.
 5. Notify other team members if you are going to push to main, but push to your branch whenever
