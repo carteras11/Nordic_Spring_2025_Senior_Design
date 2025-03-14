@@ -1,0 +1,29 @@
+/* Step 5.2 Put an overlay content here */
+&i2c2 {
+    status = "okay";
+    pinctrl-0 = <&i2c2_default>;
+	  pinctrl-1 = <&i2c2_sleep>;
+    pinctrl-names = "default", "sleep";
+    mysensor: mysensor@76{
+        compatible = "i2c-device";
+        status = "okay";
+        reg = < 0x76 >;
+    };
+};
+
+&pinctrl {
+	/omit-if-no-ref/ i2c2_default: i2c2_default {
+		group1  {
+			psels = <NRF_PSEL(TWIM_SCL, 0, 12)>,
+					    <NRF_PSEL(TWIM_SDA, 0, 13)>;
+		};
+	};
+
+	/omit-if-no-ref/ i2c2_sleep: i2c2_sleep {
+		group1  {
+			psels = <NRF_PSEL(TWIM_SCL, 0, 12)>,
+					    <NRF_PSEL(TWIM_SDA, 0, 13)>;
+			low-power-enable;
+		};
+	};
+};
