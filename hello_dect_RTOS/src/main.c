@@ -20,15 +20,17 @@ LOG_MODULE_REGISTER(app);
 
 BUILD_ASSERT(CONFIG_CARRIER, "Carrier must be configured according to local regulations");
 
+// --------------------------- Defines and Variables ----------------------------------
+
 #define DATA_LEN_MAX 32
 
 // ------ RTOS Thread Defines -------
 #define SENSOR_STACKSIZE 2048
 #define DECT_STACKSIZE 2048
 #define SENSORY_PRIORITY 7
-#define DECT_PRIORITY
+#define DECT_PRIORITY	5
 
-#define SENSORY_READ_INTERVAL_MS 2000
+#define SENSOR_READ_INTERVAL_MS  2000
 
 // --- Data Sharing -----
 static float g_current_temperature_c = 0.0f;
@@ -42,7 +44,6 @@ static uint16_t device_id;
 
 // Semaphore to synchronize modem calls. --from initial hello_dect
 K_SEM_DEFINE(operation_sem, 0, 1);
-
 
 /* Header type 1, due to endianness the order is different than in the specification. -- from initial hello_dect*/
 struct phy_ctrl_field_common {
@@ -58,15 +59,10 @@ struct phy_ctrl_field_common {
 	uint32_t pad : 24;
 };
 
-// ---- BME Data Structure ----
-struct bme280_data {
-	// Compensation/callibration parameters 
-	uint16_t dig_t1;
-	int16_t dig_t2;
-	int16_t dig_t3;
-} bmedata; 
 
-/* Callback after init operation. */
+// --------------------------- DECT Threads/Callbacks -------------------------------
+
+// Callback after init operation. (from initial hello_dect, so are the next 3)
 static void init(const uint64_t *time, int16_t temp, enum nrf_modem_dect_phy_err err,
 	  const struct nrf_modem_dect_phy_modem_cfg *cfg)
 {
@@ -103,6 +99,13 @@ static void rx_stop(const uint64_t *time, enum nrf_modem_dect_phy_err err, uint3
 {
 	LOG_DBG("rx_stop cb time %"PRIu64" status %d handle %d", *time, err, handle);
 	k_sem_give(&operation_sem);
+
+	// CONCERNS FROM GPT
+	// Check if this semaphore give is expected/needed. Often op_complete handles RX end.
+    // If receive() duration ends naturally, op_complete should be called.
+    // If nrf_modem_dect_phy_rx_stop() is called, this callback occurs.
+    // Let's assume op_complete handles the semaphore give for now based on original code.
+    // k_sem_give(&operation_sem); // Might be needed depending on exact flow
 }
 
 /* Physical Control Channel reception notification. */
@@ -172,7 +175,7 @@ static void stf_cover_seq_control(const uint64_t *time, enum nrf_modem_dect_phy_
 	LOG_WRN("Unexpectedly in %s\n", (__func__));
 }
 
-/* Dect PHY callbacks. */
+/* Dect PHY callbacks. */ //(For the callbacks mentioned above)
 static struct nrf_modem_dect_phy_callbacks dect_phy_callbacks = {
 	.init = init,
 	.deinit = deinit,
@@ -189,6 +192,8 @@ static struct nrf_modem_dect_phy_callbacks dect_phy_callbacks = {
 	.stf_cover_seq_control = stf_cover_seq_control,
 };
 
+// --------------------DECT NR+ Initialization and Functions ------------------
+
 /* Dect PHY init parameters. */
 static struct nrf_modem_dect_phy_init_params dect_phy_init_params = {
 	.harq_rx_expiry_time_us = 5000000,
@@ -203,7 +208,8 @@ static int transmit(uint32_t handle, void *data, size_t data_len)
 	struct phy_ctrl_field_common header = {
 		.header_format = 0x0,
 		.packet_length_type = 0x0,
-		.packet_length = 0x01,
+		.packet_length = 0x01,   // NOTE: this could likely be adjusted for larger 
+								//  Amounts of data
 		.short_network_id = (CONFIG_NETWORK_ID & 0xff),
 		.transmitter_id_hi = (device_id >> 8),
 		.transmitter_id_lo = (device_id & 0xff),
@@ -227,9 +233,9 @@ static int transmit(uint32_t handle, void *data, size_t data_len)
 
 	err = nrf_modem_dect_phy_tx(&tx_op_params);
 	if (err != 0) {
+		LOG_ERR("nrf_modem_dect_phy_tx failed, err %d", err);
 		return err;
 	}
-
 	return 0;
 }
 
@@ -242,50 +248,55 @@ static int receive(uint32_t handle)
 		.start_time = 0,
 		.handle = handle,
 		.network_id = CONFIG_NETWORK_ID,
-		.mode = NRF_MODEM_DECT_PHY_RX_MODE_CONTINUOUS,
+		.mode = NRF_MODEM_DECT_PHY_RX_MODE_CONTINUOUS, // NOTE: could try 
+				//NRF_MODEM_DECT_PHY_RX_MODE_SINGLE_SHOT 
 		.rssi_interval = NRF_MODEM_DECT_PHY_RSSI_INTERVAL_OFF,
 		.link_id = NRF_MODEM_DECT_PHY_LINK_UNSPECIFIED,
-		.rssi_level = -60,
+		.rssi_level = -60,  // NOTE: could likely be adjusted for range test
 		.carrier = CONFIG_CARRIER,
 		.duration = CONFIG_RX_PERIOD_S * MSEC_PER_SEC *
-			    NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ,
+			    NRF_MODEM_DECT_MODEM_TIME_TICK_RATE_KHZ, // NOTE: may a 
+														// bottleneck
 		.filter.short_network_id = CONFIG_NETWORK_ID & 0xff,
 		.filter.is_short_network_id_used = 1,
 		/* listen for everything (broadcast mode used) */
-		.filter.receiver_identity = 0,
+		.filter.receiver_identity = 0,  //NOTE: where devices can be filtered
 	};
 
 	err = nrf_modem_dect_phy_rx(&rx_op_params);
 	if (err != 0) {
+		LOG_ERR("nrf_modem_dect_phy_rx failed, err %d", err);
 		return err;
 	}
 
 	return 0;
 }
-/*BME FUNCTIONS BEGIN
-*************************************************************************
-*/
-#define SLEEP_TIME_MS 1000
 
-/* STEP 8 - Define the I2C slave device address and the addresses of relevant registers */
+
+// ----------------------- BME280 Functions/Defines ------------------------
+
+// ---- BME Data Structure ----
+struct bme280_data {
+	// Compensation/callibration parameters 
+	uint16_t dig_t1;
+	int16_t dig_t2;
+	int16_t dig_t3;
+} bmedata; 
+
+#define SLEEP_TIME_MS 1000
 #define CTRLMEAS 0xF4
 #define CALIB00	 0x88
 #define ID	     0xD0
 #define TEMPMSB	 0xFA
-
 #define CHIP_ID  0x60
 #define SENSOR_CONFIG_VALUE 0x93
 
-/* STEP 6 - Get the node identifier of the sensor */
 #define I2C_NODE DT_NODELABEL(mysensor)
 
-
-
+//used to receive the callibration data
 void bme_calibrationdata(const struct i2c_dt_spec *spec, struct bme280_data *sensor_data_ptr)
 {
-	/* Step 10 - Put calibration function code */
 	uint8_t values[6];
-
 	int ret = i2c_burst_read_dt(spec, CALIB00, values, 6);
 
 	if (ret != 0) {
@@ -296,10 +307,11 @@ void bme_calibrationdata(const struct i2c_dt_spec *spec, struct bme280_data *sen
 	sensor_data_ptr->dig_t1 = ((uint16_t)values[1]) << 8 | values[0];
 	sensor_data_ptr->dig_t2 = ((uint16_t)values[3]) << 8 | values[2];
 	sensor_data_ptr->dig_t3 = ((uint16_t)values[5]) << 8 | values[4];
-	
+	LOG_INF("BME T1: %u, T2: %d, T3: %d", sensor_data_ptr->dig_t1, sensor_data_ptr->dig_t2, sensor_data_ptr->dig_t3);
+
 }
 
-/* Compensate current temperature using previously stored sensor calibration data */
+//used to compensate data with callibration data
 static int32_t bme280_compensate_temp(struct bme280_data *data, int32_t adc_temp)
 {
 	int32_t var1, var2;
@@ -315,15 +327,67 @@ static int32_t bme280_compensate_temp(struct bme280_data *data, int32_t adc_temp
 	return ((var1 + var2) * 5 + 128) >> 8;
 }
 
-/*BME FUNCTIONS END
-*************************************************************************
-*/
+
+
+// -------------------------- Sensor Thread ------------------------------/
+
+// this is where the thread for the sensor enters. 
+void sensor_thread_entry (void *p1, void *p2, void *p3) 
+{
+	// variables to be used in the thread
+	
+	int ret;
+	uint8_t temp_val[3] = {0};
+	int32_t adc_temp;
+	int32_t comp_temp;
+	float temperature_c;
+
+	LOG_INF("Sensor thread started");
+
+	while (1) {
+        // Read raw temperature data
+        ret = i2c_burst_read_dt(&dev_i2c, TEMPMSB, temp_val, 3);
+        if (ret != 0) {
+            LOG_ERR("Failed to read temperature register, err %d", ret);
+            k_msleep(SENSOR_READ_INTERVAL_MS); // Wait before retrying
+            continue;
+        }
+
+        // Combine raw data
+        adc_temp = (temp_val[0] << 12) | (temp_val[1] << 4) | ((temp_val[2] >> 4) & 0x0F);
+
+        // Compensate temperature
+        comp_temp = bme280_compensate_temp(&bmedata, adc_temp);
+        temperature_c = (float)comp_temp / 100.0f;
+
+        // --- Update Shared Temperature Variable ---
+        ret = k_mutex_lock(&temp_mutex, K_MSEC(100)); // Wait up to 100ms for mutex
+        if (ret == 0) {
+            g_current_temperature_c = temperature_c;
+            k_mutex_unlock(&temp_mutex);
+            LOG_INF("Sensor Read: %.2f C", temperature_c);
+        } else {
+             LOG_WRN("Could not lock temp mutex in sensor thread");
+        }
+        // -----------------------------------------
+
+        // Wait before next reading
+        k_msleep(SENSOR_READ_INTERVAL_MS);
+    }
+
+
+
+}
+
+
+
+
 
 int main(void)
 {
-	/* bme part begin
-	*************************************************************************
-	*/
+	
+	// ------------------ Temperature Sensor Initialization---------------
+
 	static const struct i2c_dt_spec dev_i2c = I2C_DT_SPEC_GET(I2C_NODE);
 	uint8_t id = 0;
 	uint8_t regs[] = {ID};
@@ -331,6 +395,7 @@ int main(void)
 	bme_calibrationdata(&dev_i2c, &bmedata);
 	uint8_t sensor_config[] = {CTRLMEAS, SENSOR_CONFIG_VALUE};
 	ret = i2c_write_dt(&dev_i2c, sensor_config, 2);
+	
 	/* bme part end
 	*************************************************************************
 	*/
@@ -379,8 +444,9 @@ int main(void)
 		/* BME PART BEGIN*/
 		uint8_t temp_val[3] = {0};
 		int ret = i2c_burst_read_dt(&dev_i2c, TEMPMSB, temp_val, 3);
-		int32_t adc_temp =
-		(temp_val[0] << 12) | (temp_val[1] << 4) | ((temp_val[2] >> 4) & 0x0F);
+		int32_t adc_temp =	(temp_val[0] << 12) 
+							| (temp_val[1] << 4) 
+							| ((temp_val[2] >> 4) & 0x0F);
 
 		int32_t comp_temp = bme280_compensate_temp(&bmedata, adc_temp);
 
