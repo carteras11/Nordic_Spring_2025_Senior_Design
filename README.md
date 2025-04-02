@@ -20,5 +20,5 @@
 
 * The current hello_dect is the one that has working i2c
 * The repo is automatically set to disable build files. You will have to re-build whenever you want to test. Local build files will remain
-
+* In rangetest, load transmitter to one board and then reciever to another. Connect reciever to your laptop and run the python script.
 
