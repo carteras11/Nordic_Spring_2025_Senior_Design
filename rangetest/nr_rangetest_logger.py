@@ -52,7 +52,7 @@ if __name__=="__main__":
 
                 distance = input("New RX, enter distance: ")
                 try:
-                    print('   Logging', line.strip(), 'at distance', distance)
+                    print('   Logging', line.strip())
                     f.write(str(distance) + ',' + line.strip() + '\r\n')
                 except e:
                     print("Error writing to file", e);
