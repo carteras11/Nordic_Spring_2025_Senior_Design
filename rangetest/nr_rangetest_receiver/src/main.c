@@ -32,7 +32,6 @@ static char measurement_buf[MEASUREMENT_BUF_SIZE];
 static volatile uint16_t measurement_len;
 static volatile uint8_t new_measurement = 0;
 
-
 /* Header type 1, due to endianness the order is different than in the specification. */
 struct phy_ctrl_field_common {
 	uint32_t packet_length : 4;
