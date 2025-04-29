@@ -14,11 +14,14 @@
 3. Then, click the push button that appears at the top. 
 
 ## Building
-* Make sure to add the base config file, the extra config file, and the base devicetree overlay file too when making a new build
+* Make sure to add the base config file, the extra config file, and the base devicetree overlay file too when making a new build. For example, while building the the "hello_dect" example in this repo (which, as mentioned below, has the working i2c for the bme temp sensor), selecte the
+  * prj.conf for the "Base Configuration File"
+  * overlay-us.conf for the "extra kconfig fragments"
+  * CHANGE_TO_YOUR_BUILD_TARGET_NAME.overlay for the "base device tree overlays"
 
 ## Other Notes
 
-* The current hello_dect is the one that has working i2c
+* **The current hello_dect is the one that has working i2c**
 * The repo is automatically set to disable build files. You will have to re-build whenever you want to test. Local build files will remain
 * In rangetest, load transmitter to one board and then reciever to another. Connect reciever to your laptop and run the python script.
 
